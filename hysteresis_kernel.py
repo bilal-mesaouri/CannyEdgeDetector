@@ -1,62 +1,54 @@
-import numpy as np
 from numba import cuda
+import numpy as np
 from PIL import Image
 
-# Device function to check neighboring pixels
-@cuda.jit(device=True)
-def is_connected_to_strong(i, j, edges, strong_val):
-    for di in range(-1, 2):
-        for dj in range(-1, 2):
-            ni, nj = i + di, j + dj
-            if ni >= 0 and ni < edges.shape[0] and nj >= 0 and nj < edges.shape[1]:
-                if edges[ni, nj] == strong_val:
-                    return True
-    return False
+# Load your thresholded image data
+edge_image_path = "./edges_detecteddd.jpg"  # Adjust with your correct path
+edge_image = Image.open(edge_image_path)
+edges = np.array(edge_image, dtype=np.uint8)
 
-# Kernel to apply hysteresis
+# Create output array
+output_edges = np.zeros_like(edges)
+
+# Define the hysteresis CUDA kernel
 @cuda.jit
-def hysteresis_kernel(edge_magnitude, edges_output, low_thresh, high_thresh, strong_val, weak_val):
+def hysteresis_kernel(input_edges, output_edges):
     i, j = cuda.grid(2)
-    if i < edge_magnitude.shape[0] and j < edge_magnitude.shape[1]:
-        if edge_magnitude[i, j] > high_thresh:
-            edges_output[i, j] = strong_val  # Mark as strong edge
-        elif edge_magnitude[i, j] > low_thresh:
-            if is_connected_to_strong(i, j, edges_output, strong_val):
-                edges_output[i, j] = weak_val  # Mark as weak edge if connected to a strong edge
+    if i < input_edges.shape[0] and j < input_edges.shape[1]:
+        if input_edges[i, j] == 255:  # Strong edge
+            output_edges[i, j] = 255
+        elif input_edges[i, j] == 100:  # Weak edge
+            # Check 8-connected neighborhood
+            for di in range(-1, 2):
+                for dj in range(-1, 2):
+                    ni, nj = i + di, j + dj
+                    if 0 <= ni < input_edges.shape[0] and 0 <= nj < input_edges.shape[1]:
+                        if input_edges[ni, nj] == 255:
+                            output_edges[i, j] = 255
+                            break
+                if output_edges[i, j] == 255:
+                    break
+            if output_edges[i, j] != 255:
+                output_edges[i, j] = 0  # Suppress weak edge
         else:
-            edges_output[i, j] = 0  # Mark as non-edge
+            output_edges[i, j] = 0  # Non-edge
 
-def apply_hysteresis(edge_magnitude, low_threshold, high_threshold, strong_val=255, weak_val=75):
-    # Initialize output array
-    edges_output = np.zeros_like(edge_magnitude, dtype=np.uint8)
+# Configuration for kernel execution
+threads_per_block = (16, 16)
+blocks_per_grid_x = (edges.shape[0] + threads_per_block[0] - 1) // threads_per_block[0]
+blocks_per_grid_y = (edges.shape[1] + threads_per_block[1] - 1) // threads_per_block[1]
+blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
-    # Define grid and block dimensions
-    threads_per_block = (16, 16)
-    blocks_per_grid_x = (edge_magnitude.shape[0] + threads_per_block[0] - 1) // threads_per_block[0]
-    blocks_per_grid_y = (edge_magnitude.shape[1] + threads_per_block[1] - 1) // threads_per_block[1]
-    blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+# Prepare data on the device
+edges_device = cuda.to_device(edges)
+output_device = cuda.to_device(output_edges)
 
-    # Prepare data on device
-    d_edge_magnitude = cuda.to_device(edge_magnitude)
-    d_edges_output = cuda.to_device(edges_output)
+# Launch the kernel
+hysteresis_kernel[blocks_per_grid, threads_per_block](edges_device, output_device)
 
-    # Launch kernel
-    hysteresis_kernel[blocks_per_grid, threads_per_block](d_edge_magnitude, d_edges_output, low_threshold, high_threshold, strong_val, weak_val)
+# Copy back to host and save/display the result
+output_edges = output_device.copy_to_host()
+result_image = Image.fromarray(output_edges)
+result_image.save("./hysteresis_output.jpg")
 
-    # Copy result back to host
-    d_edges_output.copy_to_host(edges_output)
-    return edges_output
 
-# Example of loading an image and applying hysteresis
-if __name__ == "__main__":
-    image_path = "./edges_detecteddd.jpg"  # Update with your image path
-    image = Image.open(image_path)
-    image_array = np.array(image.convert('L'))  # Convert to grayscale
-    edge_magnitude = np.abs(np.float32(image_array))  # Simulate an edge magnitude array
-
-    # Apply hysteresis
-    edges_output = apply_hysteresis(edge_magnitude, 50, 100)
-
-    # Save or show result
-    output_image = Image.fromarray(edges_output)
-    output_image.save("hysteresis_output.jpg")  # Save the output image
