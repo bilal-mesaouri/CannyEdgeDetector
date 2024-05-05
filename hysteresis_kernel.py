@@ -24,6 +24,8 @@ def hysteresis_kernel(input_edges, output_edges, low_thresh, high_thresh):
             # Check 8-connected neighborhood
             for di in range(-1, 2):
                 for dj in range(-1, 2):
+                    if di == 0 and dj == 0:
+                        continue  # Skip the center pixel
                     ni, nj = i + di, j + dj
                     if 0 <= ni < input_edges.shape[0] and 0 <= nj < input_edges.shape[1]:
                         if input_edges[ni, nj] >= high_thresh:
