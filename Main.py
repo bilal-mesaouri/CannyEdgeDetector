@@ -3,9 +3,8 @@ from PIL import Image
 from numba import cuda
 
 # Load the image
-image = Image.open("./Valve_original.png")
+image = Image.open("./BWvalve.jpg")
 image_array = np.array(image)
-
 
 # Define the Gaussian filter kernel
 gaussian_filter = np.array([[1, 4, 6, 4, 1],
@@ -28,11 +27,7 @@ def apply_gaussian_filter_single_channel(array, filtered_array, gaussian_filter)
             for l in range(-2, 3):
                 if 0 <= i + k < array.shape[0] and 0 <= j + l < array.shape[1]:
                     pixel_sum += array[i + k, j + l] * gaussian_filter[k + 2, l + 2]
-                else:
-                    # Use the current pixel value for out-of-bound pixels
-                    pixel_sum += array[i, j] * gaussian_filter[k + 2, l + 2]
-
-                weight_sum += gaussian_filter[k + 2, l + 2]
+                    weight_sum += gaussian_filter[k + 2, l + 2]
 
         # Normalize the result
         filtered_array[i, j] = pixel_sum / weight_sum
@@ -42,12 +37,11 @@ def apply_gaussian_filter_single_channel(array, filtered_array, gaussian_filter)
 def apply_gaussian_filter(image_array, filtered_image_array, gaussian_filter):
     i, j = cuda.grid(2)
     if i < image_array.shape[0] and j < image_array.shape[1]:
-        for channel in range(image_array.shape[2]):
-            apply_gaussian_filter_single_channel(
-                image_array[:, :, channel], 
-                filtered_image_array[:, :, channel],
-                gaussian_filter
-            )
+        apply_gaussian_filter_single_channel(
+            image_array, 
+            filtered_image_array,
+            gaussian_filter
+        )
 
 # Calculate grid and block dimensions
 threadsperblock = (16, 16)
